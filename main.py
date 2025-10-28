@@ -308,40 +308,36 @@ spam, violence, porn, child, copyright, fake, drugs, other
             await event.reply(help_text)
         
         # Quick report commands
-        quick_commands = {
-            'spam': 'spam',
-            'fake': 'fake',
-            'violence': 'violence',
-            'copyright': 'copyright',
-            'porn': 'porn',
-            'drugs': 'drugs'
-        }
+        def create_quick_handler(reason_key):
+            async def handler(event):
+                if not self.is_admin(event.sender_id):
+                    return
+                if not event.is_reply:
+                    await event.reply("⚠️ Reply to a channel message to report")
+                    return
+                
+                try:
+                    reply = await event.get_reply_message()
+                    if reply.peer_id:
+                        status = await event.reply("🔄 Reporting...")
+                        entity = await self.client.get_entity(reply.peer_id)
+                        success = await self.report_channel(entity, self.REASONS[reason_key][1])
+                        
+                        if success:
+                            await status.edit(f"✅ Reported as {reason_key}!")
+                        else:
+                            await status.edit("❌ Failed!")
+                except Exception as e:
+                    await event.reply(f"❌ Error: {str(e)}")
+            return handler
         
-        for cmd, reason in quick_commands.items():
-            async def make_handler(r):
-                async def handler(event):
-                    if not self.is_admin(event.sender_id):
-                        return
-                    if not event.is_reply:
-                        await event.reply("⚠️ Reply to a channel message to report")
-                        return
-                    
-                    try:
-                        reply = await event.get_reply_message()
-                        if reply.peer_id:
-                            status = await event.reply("🔄 Reporting...")
-                            entity = await self.client.get_entity(reply.peer_id)
-                            success = await self.report_channel(entity, self.REASONS[r][1])
-                            
-                            if success:
-                                await status.edit(f"✅ Reported as {r}!")
-                            else:
-                                await status.edit("❌ Failed!")
-                    except Exception as e:
-                        await event.reply(f"❌ Error: {str(e)}")
-                return handler
-            
-            self.client.on(events.NewMessage(pattern=f'/{cmd}'))(await make_handler(reason))
+        # Register quick commands
+        self.client.on(events.NewMessage(pattern='/spam'))(create_quick_handler('spam'))
+        self.client.on(events.NewMessage(pattern='/fake'))(create_quick_handler('fake'))
+        self.client.on(events.NewMessage(pattern='/violence'))(create_quick_handler('violence'))
+        self.client.on(events.NewMessage(pattern='/copyright'))(create_quick_handler('copyright'))
+        self.client.on(events.NewMessage(pattern='/porn'))(create_quick_handler('porn'))
+        self.client.on(events.NewMessage(pattern='/drugs'))(create_quick_handler('drugs'))
     
     async def report_channel(self, channel, reason_class):
         """Report a single channel"""
