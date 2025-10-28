@@ -162,16 +162,53 @@ Bot is ready! 🚀
                     await event.reply(f"❌ Invalid reason. Use: {', '.join(self.REASONS.keys())}")
                     return
                 
-                status = await event.reply(f"🔄 Reporting {channel}...")
+                # Detailed status message
+                start_time = datetime.now()
+                status = await event.reply(
+                    f"🔄 **Reporting Channel**\n\n"
+                    f"🎯 Channel: `{channel}`\n"
+                    f"⚠️ Reason: {self.REASONS[reason][0]}\n"
+                    f"⏳ Processing..."
+                )
+                
+                logger.info(f"{'─'*60}")
+                logger.info(f"📍 Single Report Request")
+                logger.info(f"🎯 Channel: {channel}")
+                logger.info(f"⚠️ Reason: {self.REASONS[reason][0]}")
+                logger.info(f"⏳ Sending report...")
                 
                 success = await self.report_channel(channel, self.REASONS[reason][1])
                 
+                elapsed = (datetime.now() - start_time).total_seconds()
+                
                 if success:
-                    await status.edit(f"✅ Successfully reported {channel}")
+                    logger.info(f"✅ Report Status: SUCCESS")
+                    logger.info(f"⏱️ Time taken: {elapsed:.2f}s")
+                    await status.edit(
+                        f"✅ **Report Successful!**\n\n"
+                        f"🎯 Channel: `{channel}`\n"
+                        f"⚠️ Reason: {self.REASONS[reason][0]}\n"
+                        f"⏱️ Time: {elapsed:.2f}s\n"
+                        f"📊 Total Reports: {self.stats['total']}"
+                    )
                 else:
-                    await status.edit(f"❌ Failed to report {channel}")
+                    logger.info(f"❌ Report Status: FAILED")
+                    logger.info(f"⏱️ Time taken: {elapsed:.2f}s")
+                    await status.edit(
+                        f"❌ **Report Failed**\n\n"
+                        f"🎯 Channel: `{channel}`\n"
+                        f"⚠️ Reason: {self.REASONS[reason][0]}\n"
+                        f"⏱️ Time: {elapsed:.2f}s\n\n"
+                        f"💡 Possible reasons:\n"
+                        f"• Channel doesn't exist\n"
+                        f"• Already reported today\n"
+                        f"• Rate limit reached"
+                    )
+                
+                logger.info(f"{'─'*60}")
                     
             except Exception as e:
+                logger.error(f"❌ Error in report command: {str(e)}")
                 await event.reply(f"❌ Error: {str(e)}")
         
         @self.client.on(events.NewMessage(pattern=r'/bulk (\w+)'))
@@ -319,15 +356,44 @@ spam, violence, porn, child, copyright, fake, drugs, other
                 try:
                     reply = await event.get_reply_message()
                     if reply.peer_id:
-                        status = await event.reply("🔄 Reporting...")
+                        start_time = datetime.now()
                         entity = await self.client.get_entity(reply.peer_id)
+                        channel_name = getattr(entity, 'username', 'Unknown')
+                        
+                        status = await event.reply(
+                            f"🔄 **Quick Report**\n\n"
+                            f"🎯 Channel: @{channel_name}\n"
+                            f"⚠️ Reason: {self.REASONS[reason_key][0]}\n"
+                            f"⏳ Processing..."
+                        )
+                        
+                        logger.info(f"{'─'*60}")
+                        logger.info(f"⚡ Quick Report: @{channel_name}")
+                        logger.info(f"⚠️ Reason: {self.REASONS[reason_key][0]}")
+                        
                         success = await self.report_channel(entity, self.REASONS[reason_key][1])
+                        elapsed = (datetime.now() - start_time).total_seconds()
                         
                         if success:
-                            await status.edit(f"✅ Reported as {reason_key}!")
+                            logger.info(f"✅ Status: SUCCESS ({elapsed:.2f}s)")
+                            await status.edit(
+                                f"✅ **Report Successful!**\n\n"
+                                f"🎯 Channel: @{channel_name}\n"
+                                f"⚠️ Reason: {self.REASONS[reason_key][0]}\n"
+                                f"⏱️ Time: {elapsed:.2f}s"
+                            )
                         else:
-                            await status.edit("❌ Failed!")
+                            logger.info(f"❌ Status: FAILED ({elapsed:.2f}s)")
+                            await status.edit(
+                                f"❌ **Report Failed**\n\n"
+                                f"🎯 Channel: @{channel_name}\n"
+                                f"⚠️ Reason: {self.REASONS[reason_key][0]}\n"
+                                f"⏱️ Time: {elapsed:.2f}s"
+                            )
+                        
+                        logger.info(f"{'─'*60}")
                 except Exception as e:
+                    logger.error(f"❌ Quick report error: {str(e)}")
                     await event.reply(f"❌ Error: {str(e)}")
             return handler
         
@@ -373,49 +439,141 @@ spam, violence, porn, child, copyright, fake, drugs, other
             return False
     
     async def bulk_report(self, event, channels, reason_class, delay=8):
-        """Report multiple channels"""
+        """Report multiple channels with detailed live updates"""
         total = len(channels)
+        
+        # Initial message
+        start_time = datetime.now()
         progress = await event.reply(
-            f"🔄 **Bulk Report Started**\n\n"
-            f"📊 Total: {total} channels\n"
-            f"⏱️ Estimated: {total * delay}s\n\n"
-            f"Processing..."
+            f"🚀 **Bulk Report Started**\n\n"
+            f"📊 Total Channels: {total}\n"
+            f"⏱️ Estimated Time: {total * delay}s ({total * delay // 60}m {total * delay % 60}s)\n"
+            f"🕐 Started: {start_time.strftime('%H:%M:%S')}\n\n"
+            f"⏳ Initializing..."
         )
         
         success_count = 0
         failed_count = 0
+        success_channels = []
+        failed_channels = []
+        
+        logger.info(f"{'='*60}")
+        logger.info(f"🚀 BULK REPORT STARTED")
+        logger.info(f"📊 Total Channels: {total}")
+        logger.info(f"⏱️ Delay: {delay}s per channel")
+        logger.info(f"{'='*60}")
         
         for idx, channel in enumerate(channels, 1):
-            # Report
+            current_time = datetime.now()
+            elapsed = (current_time - start_time).total_seconds()
+            
+            # Log to console (Railway logs)
+            logger.info(f"")
+            logger.info(f"{'─'*60}")
+            logger.info(f"📍 Progress: [{idx}/{total}] ({idx/total*100:.1f}%)")
+            logger.info(f"🎯 Reporting: {channel}")
+            
+            # Report the channel
             success = await self.report_channel(channel, reason_class)
             
+            # Track results
             if success:
                 success_count += 1
+                success_channels.append(channel)
+                status_emoji = "✅"
+                status_text = "SUCCESS"
+                logger.info(f"✅ Result: SUCCESS")
             else:
                 failed_count += 1
+                failed_channels.append(channel)
+                status_emoji = "❌"
+                status_text = "FAILED"
+                logger.info(f"❌ Result: FAILED")
             
-            # Update progress every 5 reports
-            if idx % 5 == 0 or idx == total:
-                await progress.edit(
-                    f"🔄 **Bulk Report Progress**\n\n"
-                    f"📊 {idx}/{total} processed\n"
-                    f"✅ Success: {success_count}\n"
-                    f"❌ Failed: {failed_count}\n\n"
-                    f"{'⏳ Working...' if idx < total else '✅ Complete!'}"
-                )
+            # Calculate stats
+            success_rate = (success_count / idx) * 100
+            avg_time = elapsed / idx
+            remaining = total - idx
+            eta_seconds = int(remaining * avg_time + remaining * delay)
+            eta_minutes = eta_seconds // 60
+            eta_seconds_remainder = eta_seconds % 60
             
-            # Delay
+            logger.info(f"📊 Stats: {success_count} success | {failed_count} failed | {success_rate:.1f}% rate")
+            logger.info(f"⏱️ ETA: {eta_minutes}m {eta_seconds_remainder}s remaining")
+            
+            # Update Telegram message with detailed info
+            update_text = (
+                f"🔄 **Bulk Report In Progress**\n\n"
+                f"📍 **Current:** [{idx}/{total}] - {idx/total*100:.1f}%\n"
+                f"{status_emoji} `{channel}` - **{status_text}**\n\n"
+                f"📊 **Statistics:**\n"
+                f"✅ Success: {success_count}\n"
+                f"❌ Failed: {failed_count}\n"
+                f"📈 Success Rate: {success_rate:.1f}%\n\n"
+                f"⏱️ **Timing:**\n"
+                f"⏳ Elapsed: {int(elapsed//60)}m {int(elapsed%60)}s\n"
+                f"🕐 ETA: {eta_minutes}m {eta_seconds_remainder}s\n\n"
+                f"{'✅ **COMPLETE!**' if idx == total else '⏳ Processing...'}"
+            )
+            
+            try:
+                await progress.edit(update_text)
+            except Exception as e:
+                # If message edit fails (too frequent), log it
+                logger.warning(f"⚠️ Message update skipped: {e}")
+            
+            # Delay before next report (except for last one)
             if idx < total:
+                logger.info(f"⏸️ Waiting {delay}s before next report...")
                 await asyncio.sleep(delay)
         
-        # Final summary
-        await progress.edit(
+        # Final summary with full details
+        total_time = (datetime.now() - start_time).total_seconds()
+        final_rate = (success_count / total) * 100
+        
+        logger.info(f"")
+        logger.info(f"{'='*60}")
+        logger.info(f"✅ BULK REPORT COMPLETED")
+        logger.info(f"{'='*60}")
+        logger.info(f"📊 Total: {total} channels")
+        logger.info(f"✅ Successful: {success_count}")
+        logger.info(f"❌ Failed: {failed_count}")
+        logger.info(f"📈 Success Rate: {final_rate:.1f}%")
+        logger.info(f"⏱️ Total Time: {int(total_time//60)}m {int(total_time%60)}s")
+        logger.info(f"{'='*60}")
+        
+        # Detailed final message in Telegram
+        final_message = (
             f"✅ **Bulk Report Complete!**\n\n"
-            f"📊 Total: {total}\n"
-            f"✅ Success: {success_count}\n"
-            f"❌ Failed: {failed_count}\n"
-            f"📈 Rate: {(success_count/total*100):.1f}%"
+            f"📊 **Summary:**\n"
+            f"• Total: {total} channels\n"
+            f"• Success: {success_count} ✅\n"
+            f"• Failed: {failed_count} ❌\n"
+            f"• Success Rate: {final_rate:.1f}%\n\n"
+            f"⏱️ **Time:**\n"
+            f"• Duration: {int(total_time//60)}m {int(total_time%60)}s\n"
+            f"• Started: {start_time.strftime('%H:%M:%S')}\n"
+            f"• Finished: {datetime.now().strftime('%H:%M:%S')}\n\n"
         )
+        
+        # Add successful channels list (if not too long)
+        if success_channels and len(success_channels) <= 20:
+            final_message += f"✅ **Successful Reports:**\n"
+            for ch in success_channels[:20]:
+                final_message += f"• {ch}\n"
+            if len(success_channels) > 20:
+                final_message += f"• ... and {len(success_channels) - 20} more\n"
+            final_message += "\n"
+        
+        # Add failed channels list (if any)
+        if failed_channels:
+            final_message += f"❌ **Failed Reports:**\n"
+            for ch in failed_channels[:10]:
+                final_message += f"• {ch}\n"
+            if len(failed_channels) > 10:
+                final_message += f"• ... and {len(failed_channels) - 10} more\n"
+        
+        await progress.edit(final_message)
     
     def clean_channel(self, channel):
         """Clean channel format"""
