@@ -1,14 +1,6 @@
 """
 Telegram Channel Reporter Userbot
-Railway/Cloud Deployment Ready
-
-File Structure:
-├── main.py (this file)
-├── requirements.txt
-├── .env.example
-├── .gitignore
-├── README.md
-└── Procfile (for Railway)
+Railway/Cloud Deployment Ready - FIXED VERSION
 """
 
 import asyncio
@@ -16,6 +8,7 @@ import logging
 import os
 from datetime import datetime
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 from telethon.tl.functions.account import ReportPeerRequest
 from telethon.tl.types import (
     InputReportReasonSpam,
@@ -43,7 +36,7 @@ class ChannelReporterBot:
         self.api_id = int(os.getenv('API_ID', '0'))
         self.api_hash = os.getenv('API_HASH', '')
         self.phone_number = os.getenv('PHONE_NUMBER', '')
-        self.session_string = os.getenv('SESSION_STRING', 'reporter_session')
+        self.session_string = os.getenv('SESSION_STRING', '')
         
         # Admin IDs who can control the bot
         admin_ids = os.getenv('ADMIN_IDS', '')
@@ -79,9 +72,23 @@ class ChannelReporterBot:
         """Initialize the bot"""
         logger.info("🚀 Starting Channel Reporter Bot...")
         
-        # Create client
+        # Validate environment variables
+        if not self.session_string:
+            logger.error("❌ SESSION_STRING not found in environment variables!")
+            logger.info("Run generate_session.py locally and add SESSION_STRING to Railway")
+            return False
+        
+        if self.api_id == 0 or not self.api_hash:
+            logger.error("❌ API_ID or API_HASH not configured!")
+            return False
+        
+        if not self.admin_ids:
+            logger.error("❌ ADMIN_IDS not configured!")
+            return False
+        
+        # Create client with StringSession (CRITICAL FOR RAILWAY)
         self.client = TelegramClient(
-            self.session_string,
+            StringSession(self.session_string),
             self.api_id,
             self.api_hash
         )
@@ -90,13 +97,14 @@ class ChannelReporterBot:
         
         # Check authorization
         if not await self.client.is_user_authorized():
-            logger.error("❌ Not authorized! Please generate session string first.")
-            logger.info("Run: python generate_session.py")
+            logger.error("❌ Not authorized! Session string may be invalid.")
+            logger.info("Regenerate session: python generate_session.py")
             return False
         
         me = await self.client.get_me()
         logger.info(f"✅ Logged in as: {me.first_name} (@{me.username or 'N/A'})")
-        logger.info(f"👥 Admins: {len(self.admin_ids)}")
+        logger.info(f"👥 Admins: {self.admin_ids}")
+        logger.info(f"📱 Phone: {self.phone_number}")
         
         # Setup handlers
         self.setup_handlers()
@@ -117,7 +125,7 @@ class ChannelReporterBot:
             menu = f"""
 🤖 **Channel Reporter Bot**
 
-📊 **Status:** Online
+📊 **Status:** Online ✅
 ⏱️ **Uptime:** {hours}h
 📈 **Reports:** {self.stats['total']}
 
@@ -143,6 +151,10 @@ Bot is ready! 🚀
             
             try:
                 parts = event.text.split()
+                if len(parts) < 3:
+                    await event.reply("❌ Usage: `/report @channel reason`")
+                    return
+                
                 channel = parts[1]
                 reason = parts[2].lower()
                 
@@ -168,24 +180,30 @@ Bot is ready! 🚀
             if not self.is_admin(event.sender_id):
                 return
             
-            reason = event.text.split()[1].lower()
-            
-            if reason not in self.REASONS:
-                await event.reply(f"❌ Invalid reason. Use: {', '.join(self.REASONS.keys())}")
-                return
-            
-            await event.reply(
-                f"📋 **Bulk Mode: {self.REASONS[reason][0]}**\n\n"
-                f"Send channel list (one per line):\n"
-                f"```\n@channel1\n@channel2\nt.me/channel3\n```\n\n"
-                f"Reply with list when ready."
-            )
-            
-            # Store state
-            event.client.bulk_mode = {
-                'user_id': event.sender_id,
-                'reason': reason
-            }
+            try:
+                reason = event.text.split()[1].lower()
+                
+                if reason not in self.REASONS:
+                    await event.reply(f"❌ Invalid reason. Use: {', '.join(self.REASONS.keys())}")
+                    return
+                
+                await event.reply(
+                    f"📋 **Bulk Mode: {self.REASONS[reason][0]}**\n\n"
+                    f"Send channel list (one per line):\n"
+                    f"```\n@channel1\n@channel2\nt.me/channel3\n```\n\n"
+                    f"Reply with list when ready."
+                )
+                
+                # Store state
+                if not hasattr(self.client, 'bulk_modes'):
+                    self.client.bulk_modes = {}
+                
+                self.client.bulk_modes[event.sender_id] = {
+                    'reason': reason,
+                    'timestamp': datetime.now()
+                }
+            except Exception as e:
+                await event.reply(f"❌ Error: {str(e)}")
         
         @self.client.on(events.NewMessage)
         async def bulk_list_handler(event):
@@ -194,11 +212,10 @@ Bot is ready! 🚀
                 return
             
             # Check if in bulk mode
-            if not hasattr(event.client, 'bulk_mode'):
+            if not hasattr(self.client, 'bulk_modes'):
                 return
             
-            bulk_data = event.client.bulk_mode
-            if bulk_data['user_id'] != event.sender_id:
+            if event.sender_id not in self.client.bulk_modes:
                 return
             
             # Parse channels
@@ -215,8 +232,9 @@ Bot is ready! 🚀
             if not channels:
                 return
             
-            # Clear bulk mode
-            delattr(event.client, 'bulk_mode')
+            # Get reason and clear bulk mode
+            bulk_data = self.client.bulk_modes[event.sender_id]
+            del self.client.bulk_modes[event.sender_id]
             
             # Start reporting
             reason_class = self.REASONS[bulk_data['reason']][1]
@@ -290,33 +308,40 @@ spam, violence, porn, child, copyright, fake, drugs, other
             await event.reply(help_text)
         
         # Quick report commands
-        for cmd, reason in [
-            ('spam', 'spam'),
-            ('fake', 'fake'),
-            ('violence', 'violence'),
-            ('copyright', 'copyright')
-        ]:
-            @self.client.on(events.NewMessage(pattern=f'/{cmd}'))
-            async def quick_report(event, r=reason):
-                if not self.is_admin(event.sender_id):
-                    return
-                if not event.is_reply:
-                    await event.reply("⚠️ Reply to a channel message to report")
-                    return
-                
-                try:
-                    reply = await event.get_reply_message()
-                    if reply.peer_id:
-                        status = await event.reply("🔄 Reporting...")
-                        entity = await self.client.get_entity(reply.peer_id)
-                        success = await self.report_channel(entity, self.REASONS[r][1])
-                        
-                        if success:
-                            await status.edit("✅ Reported!")
-                        else:
-                            await status.edit("❌ Failed!")
-                except Exception as e:
-                    await event.reply(f"❌ Error: {str(e)}")
+        quick_commands = {
+            'spam': 'spam',
+            'fake': 'fake',
+            'violence': 'violence',
+            'copyright': 'copyright',
+            'porn': 'porn',
+            'drugs': 'drugs'
+        }
+        
+        for cmd, reason in quick_commands.items():
+            async def make_handler(r):
+                async def handler(event):
+                    if not self.is_admin(event.sender_id):
+                        return
+                    if not event.is_reply:
+                        await event.reply("⚠️ Reply to a channel message to report")
+                        return
+                    
+                    try:
+                        reply = await event.get_reply_message()
+                        if reply.peer_id:
+                            status = await event.reply("🔄 Reporting...")
+                            entity = await self.client.get_entity(reply.peer_id)
+                            success = await self.report_channel(entity, self.REASONS[r][1])
+                            
+                            if success:
+                                await status.edit(f"✅ Reported as {r}!")
+                            else:
+                                await status.edit("❌ Failed!")
+                    except Exception as e:
+                        await event.reply(f"❌ Error: {str(e)}")
+                return handler
+            
+            self.client.on(events.NewMessage(pattern=f'/{cmd}'))(await make_handler(reason))
     
     async def report_channel(self, channel, reason_class):
         """Report a single channel"""
@@ -411,7 +436,7 @@ spam, violence, porn, child, copyright, fake, drugs, other
         """Run the bot"""
         if await self.start():
             logger.info("✅ Bot is running!")
-            logger.info("Press Ctrl+C to stop")
+            logger.info("💬 Send /start to your account to begin")
             await self.client.run_until_disconnected()
         else:
             logger.error("❌ Failed to start bot")
